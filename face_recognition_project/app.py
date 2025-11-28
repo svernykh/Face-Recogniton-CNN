@@ -164,7 +164,7 @@ if img_file_buffer is not None:
     
     # Tampilkan hasil visualisasi
     if img_boxed is not None:
-        st.image(img_boxed, caption="Deteksi Wajah", use_column_width=True)
+        st.image(img_boxed, caption="Deteksi Wajah", use_container_width=True)
     
     if cropped_face is not None:
         st.sidebar.image(cropped_face, caption="Wajah Dicrop", width=150)
