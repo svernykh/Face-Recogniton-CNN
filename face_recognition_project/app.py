@@ -114,6 +114,29 @@ def predict_face(image):
         return None, "Model Error", 0.0, None
     
     img_array = np.array(image.convert('RGB'))
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    
+    cascade_path = get_haar_cascade_path()
+    if not cascade_path:
+        return None, "Haar Cascade Missing", 0.0, None
+        
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    if face_cascade.empty():
+        return None, "Error loading Cascade XML", 0.0, None
+
+    # Sidebar untuk tuning parameter (Opsional, untuk debugging)
+    st.sidebar.subheader("🛠️ Konfigurasi Deteksi Wajah")
+    scale_factor = st.sidebar.slider("Scale Factor", 1.01, 1.5, 1.1, 0.01)
+    min_neighbors = st.sidebar.slider("Min Neighbors", 1, 10, 3) 
+    
+    # Adjust parameters to reduce false positives (scaleFactor, minNeighbors)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=scale_factor, minNeighbors=min_neighbors, minSize=(30, 30))
+    
+    if len(faces) == 0:
+        return img_array, "Wajah tidak terdeteksi", 0.0, None
+    
+    # Ambil wajah terbesar (asumsi yang paling relevan)
+    largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
     (x, y, w, h) = largest_face
     
     # Draw rectangle for visualization
