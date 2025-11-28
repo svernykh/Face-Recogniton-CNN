@@ -9,6 +9,7 @@ import torch.nn as nn
 from torchvision import models, transforms
 import os
 import urllib.request
+import mediapipe as mp
 
 # 1. Konfigurasi Halaman
 st.set_page_config(page_title="Absensi Face Recognition", layout="centered")
@@ -16,6 +17,11 @@ st.title("📸 Absensi Kelas Otomatis")
 
 # Konfigurasi Device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Initialize MediaPipe Face Detection
+mp_face_detection = mp.solutions.face_detection
+mp_drawing = mp.solutions.drawing_utils
+face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 
 # 2. Load Label Map
 @st.cache_data
@@ -90,22 +96,55 @@ val_transform = transforms.Compose([
 # 4. Fungsi Preprocessing & Prediksi
 def predict_face(image):
     if model is None:
-        return None, "Model Error", 0.0
+        return None, "Model Error", 0.0, None
     
-    # Transform
-    img_tensor = val_transform(image)
-    img_expanded = img_tensor.unsqueeze(0).to(device)
+    # Convert PIL Image to NumPy array (RGB)
+    img_array = np.array(image.convert('RGB'))
     
-    # Prediksi
-    with torch.no_grad():
-        outputs = model(img_expanded)
-        probabilities = torch.nn.functional.softmax(outputs, dim=1)
-        max_prob, predicted = probabilities.max(1)
-        class_index = predicted.item()
-        confidence = max_prob.item()
+    # MediaPipe process
+    results = face_detection.process(img_array)
+    
+    img_with_box = img_array.copy()
+    
+    if not results.detections:
+        return img_with_box, "Wajah tidak terdeteksi", 0.0, None
         
-    predicted_name = idx_to_label.get(class_index, "Unknown")
-    return image, predicted_name, confidence
+    # Ambil deteksi dengan score tertinggi
+    best_detection = max(results.detections, key=lambda d: d.score[0])
+    
+    # Extract Bounding Box
+    bboxC = best_detection.location_data.relative_bounding_box
+    ih, iw, _ = img_array.shape
+    x, y, w, h = int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw), int(bboxC.height * ih)
+    
+    # Ensure box is within image bounds
+    x, y = max(0, x), max(0, y)
+    w, h = min(w, iw - x), min(h, ih - y)
+    
+    # Draw Box
+    cv2.rectangle(img_with_box, (x, y), (x + w, y + h), (0, 255, 0), 3)
+    
+    # Crop Face
+    face_img = image.crop((x, y, x + w, y + h))
+    
+    # Transform for Model
+    try:
+        img_tensor = val_transform(face_img)
+        img_expanded = img_tensor.unsqueeze(0).to(device)
+        
+        # Predict
+        with torch.no_grad():
+            outputs = model(img_expanded)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+            max_prob, predicted = probabilities.max(1)
+            class_index = predicted.item()
+            confidence = max_prob.item()
+            
+        predicted_name = idx_to_label.get(class_index, "Unknown")
+        return img_with_box, predicted_name, confidence, face_img
+        
+    except Exception as e:
+        return img_with_box, f"Error: {str(e)}", 0.0, None
 
 # 5. Fitur Kamera
 img_file_buffer = st.camera_input("Ambil Foto untuk Absen")
@@ -114,16 +153,19 @@ if img_file_buffer is not None:
     image = Image.open(img_file_buffer)
     
     # Lakukan Prediksi
-    img_display, nama_terdeteksi, confidence = predict_face(image)
+    img_boxed, nama_terdeteksi, confidence, cropped_face = predict_face(image)
     
     # Tampilkan hasil visualisasi
-    if img_display is not None:
-        st.image(img_display, caption="Input Image", use_container_width=True)
+    if img_boxed is not None:
+        st.image(img_boxed, caption="Deteksi Wajah (MediaPipe)", use_container_width=True)
+    
+    if cropped_face is not None:
+        st.sidebar.image(cropped_face, caption="Wajah Dicrop", width=150)
     
     # Threshold Confidence
-    CONFIDENCE_THRESHOLD = 0.60 # Bisa disesuaikan
+    CONFIDENCE_THRESHOLD = 0.60 
     
-    if nama_terdeteksi == "Model Error":
+    if nama_terdeteksi in ["Wajah tidak terdeteksi", "Model Error"] or nama_terdeteksi.startswith("Error"):
         st.warning(f"Status: {nama_terdeteksi}")
     elif confidence < CONFIDENCE_THRESHOLD:
         st.warning(f"Wajah terdeteksi tetapi tidak dikenali (Confidence: {confidence:.2f})")
