@@ -116,6 +116,16 @@ def predict_face(image):
     bboxC = best_detection.location_data.relative_bounding_box
     ih, iw, _ = img_array.shape
     x, y, w, h = int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw), int(bboxC.height * ih)
+
+    # Expand bounding box to include whole head/hair
+    pad_top = int(h * 0.5)    # Add 50% height to top
+    pad_bottom = int(h * 0.1) # Add 10% height to bottom
+    pad_side = int(w * 0.2)   # Add 20% width to sides
+
+    x = x - pad_side
+    y = y - pad_top
+    w = w + (pad_side * 2)
+    h = h + pad_top + pad_bottom
     
     # Ensure box is within image bounds
     x, y = max(0, x), max(0, y)
