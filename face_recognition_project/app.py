@@ -19,17 +19,16 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # 2. Load Label Map
 @st.cache_data
 def load_label_map():
-    # Asumsi dataset.csv ada di folder parent (satu level di atas app.py)
-    # Jika app.py ada di root, sesuaikan path ini
-    csv_path = "../dataset.csv" 
+    # Gunakan path relative terhadap lokasi file app.py
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # dataset.csv ada di parent directory (root project)
+    csv_path = os.path.join(os.path.dirname(current_dir), "dataset.csv")
+    
     if not os.path.exists(csv_path):
         st.error(f"File {csv_path} tidak ditemukan! Pastikan path dataset benar.")
         return {}
     
     df = pd.read_csv(csv_path)
-    # Recreate label map logic from notebook
-    # label_map = {label: idx for idx, label in enumerate(df['label'].unique())}
-    # idx_to_label = {idx: label for label, idx in label_map.items()}
     
     # Kita butuh idx -> label untuk prediksi
     unique_labels = df['label'].unique()
@@ -50,7 +49,7 @@ def get_model(num_classes):
     for param in model.parameters():
         param.requires_grad = False
         
-    # Unfreeze the last two feature blocks (optional for inference, but good to match structure)
+    # Unfreeze the last two feature blocks
     for param in model.features[-1].parameters():
         param.requires_grad = True
     for param in model.features[-2].parameters():
@@ -68,14 +67,16 @@ def get_model(num_classes):
 @st.cache_resource
 def load_my_model(num_classes):
     model = get_model(num_classes)
-    # Load weights
-    model_path = "efficientnet_v2_m_finetuned.pth"
+    
+    # Load weights relative to app.py
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(current_dir, "efficientnet_v2_m_finetuned.pth")
+    
     if not os.path.exists(model_path):
         st.error(f"Model {model_path} tidak ditemukan!")
         return None
     
     # Load state dict
-    # map_location=device ensures it loads to CPU if CUDA not available
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
@@ -87,7 +88,7 @@ else:
     st.error("Gagal memuat label map. Aplikasi tidak dapat berjalan.")
     model = None
 
-# Preprocessing transforms (sama dengan val_transform di notebook)
+# Preprocessing transforms
 IMG_SIZE = 480
 val_transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
@@ -111,11 +112,10 @@ def predict_face(image):
     if len(faces) == 0:
         return "Wajah tidak terdeteksi"
     
-    # Ambil wajah pertama yang terdeteksi (atau bisa dimodifikasi untuk multiple faces)
+    # Ambil wajah pertama yang terdeteksi
     (x, y, w, h) = faces[0]
     
     # Crop wajah
-    # Tambahkan sedikit margin jika perlu
     face_img = image.crop((x, y, x+w, y+h))
     
     # Transform untuk model
