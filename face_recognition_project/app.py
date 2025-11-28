@@ -87,67 +87,13 @@ val_transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-# Helper: Download Haar Cascade if missing
-def get_haar_cascade_path():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    cascade_path = os.path.join(current_dir, 'haarcascade_frontalface_default.xml')
-    
-    if not os.path.exists(cascade_path):
-        # Try using cv2 data first
-        cv2_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
-        if os.path.exists(cv2_path):
-            return cv2_path
-            
-        # Download if not found anywhere
-        url = "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"
-        try:
-            urllib.request.urlretrieve(url, cascade_path)
-            return cascade_path
-        except Exception as e:
-            st.error(f"Gagal mengunduh Haar Cascade: {e}")
-            return None
-    return cascade_path
-
 # 4. Fungsi Preprocessing & Prediksi
 def predict_face(image):
     if model is None:
-        return None, "Model Error", 0.0, None
-    
-    img_array = np.array(image.convert('RGB'))
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    
-    cascade_path = get_haar_cascade_path()
-    if not cascade_path:
-        return None, "Haar Cascade Missing", 0.0, None
-        
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-    if face_cascade.empty():
-        return None, "Error loading Cascade XML", 0.0, None
-
-    # Sidebar untuk tuning parameter (Opsional, untuk debugging)
-    st.sidebar.subheader("🛠️ Konfigurasi Deteksi Wajah")
-    scale_factor = st.sidebar.slider("Scale Factor", 1.01, 1.5, 1.1, 0.01)
-    min_neighbors = st.sidebar.slider("Min Neighbors", 1, 10, 3) 
-    
-    # Adjust parameters to reduce false positives (scaleFactor, minNeighbors)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=scale_factor, minNeighbors=min_neighbors, minSize=(30, 30))
-    
-    if len(faces) == 0:
-        return img_array, "Wajah tidak terdeteksi", 0.0, None
-    
-    # Ambil wajah terbesar (asumsi yang paling relevan)
-    largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
-    (x, y, w, h) = largest_face
-    
-    # Draw rectangle for visualization
-    img_with_box = img_array.copy()
-    cv2.rectangle(img_with_box, (x, y), (x+w, y+h), (0, 255, 0), 3)
-    
-    # Crop wajah
-    face_img = image.crop((x, y, x+w, y+h))
+        return None, "Model Error", 0.0
     
     # Transform
-    img_tensor = val_transform(face_img)
+    img_tensor = val_transform(image)
     img_expanded = img_tensor.unsqueeze(0).to(device)
     
     # Prediksi
@@ -159,7 +105,7 @@ def predict_face(image):
         confidence = max_prob.item()
         
     predicted_name = idx_to_label.get(class_index, "Unknown")
-    return img_with_box, predicted_name, confidence, face_img
+    return image, predicted_name, confidence
 
 # 5. Fitur Kamera
 img_file_buffer = st.camera_input("Ambil Foto untuk Absen")
@@ -168,19 +114,16 @@ if img_file_buffer is not None:
     image = Image.open(img_file_buffer)
     
     # Lakukan Prediksi
-    img_boxed, nama_terdeteksi, confidence, cropped_face = predict_face(image)
+    img_display, nama_terdeteksi, confidence = predict_face(image)
     
     # Tampilkan hasil visualisasi
-    if img_boxed is not None:
-        st.image(img_boxed, caption="Deteksi Wajah", use_container_width=True)
-    
-    if cropped_face is not None:
-        st.sidebar.image(cropped_face, caption="Wajah Dicrop", width=150)
+    if img_display is not None:
+        st.image(img_display, caption="Input Image", use_container_width=True)
     
     # Threshold Confidence
     CONFIDENCE_THRESHOLD = 0.60 # Bisa disesuaikan
     
-    if nama_terdeteksi in ["Wajah tidak terdeteksi", "Model Error", "Haar Cascade Missing"]:
+    if nama_terdeteksi == "Model Error":
         st.warning(f"Status: {nama_terdeteksi}")
     elif confidence < CONFIDENCE_THRESHOLD:
         st.warning(f"Wajah terdeteksi tetapi tidak dikenali (Confidence: {confidence:.2f})")
