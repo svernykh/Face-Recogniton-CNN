@@ -3,6 +3,6 @@ numpy
 pandas
 opencv-python-headless
 pillow
-tensorflow-cpu  # Gunakan versi CPU agar ringan dan file tidak terlalu besar
-# torch (jika pakai pytorch)
-# torchvision (jika pakai pytorch)
+torch
+torchvision
+--index-url https://download.pytorch.org/whl/cu121
