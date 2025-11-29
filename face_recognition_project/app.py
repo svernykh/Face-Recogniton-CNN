@@ -156,53 +156,132 @@ def predict_face(image):
     except Exception as e:
         return img_with_box, f"Error: {str(e)}", 0.0, None
 
-# 5. Fitur Kamera
-img_file_buffer = st.camera_input("Ambil Foto untuk Absen")
+# 5. Fitur Kamera Real-Time
+if 'run_camera' not in st.session_state:
+    st.session_state.run_camera = False
 
-if img_file_buffer is not None:
-    image = Image.open(img_file_buffer)
+# State untuk menyimpan data sementara sebelum konfirmasi
+if 'pending_attendance' not in st.session_state:
+    st.session_state.pending_attendance = None
+
+# Jika ada data pending, tampilkan UI Konfirmasi
+if st.session_state.pending_attendance:
+    st.info("Wajah Terdeteksi! Silakan konfirmasi.")
     
-    # Lakukan Prediksi
-    img_boxed, nama_terdeteksi, confidence, cropped_face = predict_face(image)
+    col_img, col_info = st.columns([1, 2])
     
-    # Tampilkan hasil visualisasi
-    if img_boxed is not None:
-        st.image(img_boxed, caption="Deteksi Wajah (MediaPipe)", use_container_width=True)
-    
-    if cropped_face is not None:
-        st.sidebar.image(cropped_face, caption="Wajah Dicrop", width=150)
-    
-    # Threshold Confidence
-    CONFIDENCE_THRESHOLD = 0.60 
-    
-    if nama_terdeteksi in ["Wajah tidak terdeteksi", "Model Error"] or nama_terdeteksi.startswith("Error"):
-        st.warning(f"Status: {nama_terdeteksi}")
-    elif confidence < CONFIDENCE_THRESHOLD:
-        st.warning(f"Wajah terdeteksi tetapi tidak dikenali (Confidence: {confidence:.2f})")
-        st.info(f"Prediksi terdekat: {nama_terdeteksi}")
-    else:
-        st.success(f"Wajah dikenali sebagai: **{nama_terdeteksi}**")
-        st.metric("Confidence", f"{confidence:.2%}")
+    with col_img:
+        # Tampilkan wajah yang dicrop
+        st.image(st.session_state.pending_attendance['face_img'], caption="Wajah Terdeteksi", width=150)
         
-        # 6. Simpan ke CSV
-        if st.button("Simpan Absen"):
-            waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            df_new = pd.DataFrame({'Nama': [nama_terdeteksi], 'Waktu': [waktu]})
-            
-            try:
-                df_old = pd.read_csv("attendance.csv")
-                df = pd.concat([df_old, df_new], ignore_index=True)
-            except FileNotFoundError:
-                df = df_new
+    with col_info:
+        st.success(f"Nama: **{st.session_state.pending_attendance['name']}**")
+        st.write(f"Confidence: {st.session_state.pending_attendance['confidence']:.2%}")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("✅ Konfirmasi Absen", type="primary"):
+                nama = st.session_state.pending_attendance['name']
+                waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-            df.to_csv("attendance.csv", index=False)
-            st.toast("Absensi berhasil disimpan!")
+                # Simpan ke CSV
+                df_new = pd.DataFrame({'Nama': [nama], 'Waktu': [waktu]})
+                try:
+                    df_old = pd.read_csv("attendance.csv")
+                    df = pd.concat([df_old, df_new], ignore_index=True)
+                except FileNotFoundError:
+                    df = df_new
+                
+                df.to_csv("attendance.csv", index=False)
+                
+                st.toast(f"Absensi berhasil disimpan: {nama}")
+                st.session_state.pending_attendance = None # Reset state
+                st.rerun()
+                
+        with col_btn2:
+            if st.button("🔄 Scan Ulang"):
+                st.session_state.pending_attendance = None # Reset state
+                st.session_state.run_camera = True # Nyalakan kamera lagi
+                st.rerun()
+
+else:
+    # UI Kamera Normal
+    col1, col2 = st.columns(2)
+    with col1:
+        start_button = st.button("Mulai Kamera", type="primary")
+    with col2:
+        stop_button = st.button("Stop Kamera", type="secondary")
+
+    if start_button:
+        st.session_state.run_camera = True
+    if stop_button:
+        st.session_state.run_camera = False
+
+    # Placeholder untuk video
+    frame_placeholder = st.empty()
+    status_placeholder = st.empty()
+
+    CONFIDENCE_THRESHOLD = 0.60
+
+    if st.session_state.run_camera:
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            st.error("Tidak dapat membuka kamera.")
+        else:
+            while st.session_state.run_camera:
+                ret, frame = cap.read()
+                if not ret:
+                    st.error("Gagal membaca frame dari kamera.")
+                    break
+                
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(rgb_frame)
+                
+                img_boxed, nama_terdeteksi, confidence, cropped_face = predict_face(pil_image)
+                
+                display_frame = img_boxed.copy()
+                status_color = (255, 0, 0)
+                status_text = "Mencari Wajah..."
+                
+                if nama_terdeteksi not in ["Wajah tidak terdeteksi", "Model Error"] and not nama_terdeteksi.startswith("Error"):
+                    if confidence >= CONFIDENCE_THRESHOLD:
+                        status_color = (0, 255, 0)
+                        status_text = f"Ditemukan: {nama_terdeteksi}"
+                        
+                        # --- PAUSE & CONFIRM LOGIC ---
+                        # Simpan data ke session state
+                        st.session_state.pending_attendance = {
+                            'name': nama_terdeteksi,
+                            'confidence': confidence,
+                            'face_img': cropped_face
+                        }
+                        st.session_state.run_camera = False # Stop loop
+                        cap.release()
+                        st.rerun() # Refresh halaman untuk masuk ke mode konfirmasi
+                        
+                    else:
+                        status_color = (255, 255, 0)
+                        status_text = f"Tidak Yakin: {nama_terdeteksi} ({confidence:.0%})"
+                elif nama_terdeteksi == "Wajah tidak terdeteksi":
+                     status_text = "Wajah tidak terdeteksi"
+                
+                cv2.putText(display_frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+                frame_placeholder.image(display_frame, channels="RGB", use_container_width=True)
+                status_placeholder.info(f"Status: {status_text}")
+
+            cap.release()
+            frame_placeholder.empty()
+            status_placeholder.empty()
+            if not st.session_state.pending_attendance:
+                st.write("Kamera berhenti.")
 
 # 7. Tampilkan Data Absen
 st.write("---")
 st.subheader("📝 Log Absensi Hari Ini")
 try:
     df_show = pd.read_csv("attendance.csv")
-    st.dataframe(df_show.tail(5))
+    # Tampilkan data terbaru di atas
+    st.dataframe(df_show.iloc[::-1].head(10))
 except FileNotFoundError:
     st.write("Belum ada data absensi.")
