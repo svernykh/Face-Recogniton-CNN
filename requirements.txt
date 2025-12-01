@@ -1,5 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cu121
-
+streamlit
+opencv-python-headless
+mediapipe
 pandas
 numpy
 matplotlib
